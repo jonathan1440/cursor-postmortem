@@ -1,0 +1,5 @@
+# Prompt log (contains your prompts; keep local)
+.cursor/prompt-log.jsonl
+
+# Optional: uncomment if you use the memory MCP and don't want store in git
+# .cursor/memory/
