@@ -5,7 +5,7 @@ Track every prompt you send in Cursor, analyze patterns, and use the results to 
 ## How it works
 
 1. **beforeSubmitPrompt** (Cursor [hooks](https://cursor.com/docs/agent/hooks)) runs when you hit send. A script reads the prompt and metadata, appends one JSON line to `.cursor/prompt-log.jsonl`, and always returns `continue: true` so the request is never blocked.
-2. You run **`scripts/analyze-prompts.py`** when you want a report. It reads the log, finds repeated “first lines” (recurring intents), and prints a summary plus **suggested sections** for CLAUDE.md.
+2. You run **`scripts/analyze-prompts.py`** when you want a report. It reads the log, extracts phrases from **full prompt text**, counts how often each phrase appears across prompts, and prints a summary plus **suggested sections** for CLAUDE.md from the most recurring topics.
 3. You add those sections to CLAUDE.md (or `.cursor/rules`) and fill in 1–2 sentences each. Future prompts in that area get the context automatically.
 
 No AI memory store, no MCP—just logging and a local analyzer.
@@ -62,7 +62,7 @@ You can run the hook from your **user Cursor config** so it applies to every pro
    ```
    You’ll see:
    - Total prompts, how many had attachments, average prompt length.
-   - Most frequent first lines (things you ask repeatedly).
+   - Most frequent phrases across full prompts (recurring topics).
    - **Suggested additions for CLAUDE.md**: headings plus `<!-- Add 1–2 sentences -->` placeholders.
 4. Create or edit `CLAUDE.md` (or a rule in `.cursor/rules/`) and add the suggested sections. Replace the placeholders with the real context (stack, convention, or decision). Re-run the analyzer anytime to get fresh suggestions.
 
@@ -99,7 +99,7 @@ Then open the target project in Cursor and use it as usual; run `python3 scripts
 | `python3 scripts/analyze-prompts.py --suggest-only` | Only the suggested doc sections (no stats). |
 | `python3 scripts/analyze-prompts.py --log path/to/log.jsonl` | Use a different log file (e.g. another project or a backup). |
 
-Suggestions are based on **first-line frequency**: any first line that appears at least twice becomes a suggested heading. Fill in the body yourself.
+Suggestions are based on **phrase frequency** over full prompt text: 2–5 word n-grams are extracted from each prompt (excluding generic boilerplate like “can you”, “how to”), counted across all prompts, and the most repeated become suggested headings. Fill in the body yourself.
 
 ### Log file
 

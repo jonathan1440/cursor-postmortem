@@ -36,23 +36,45 @@ def load_log(log_path: Path) -> list[dict]:
     return out
 
 
-def normalize_first_line(s: str) -> str:
-    """Normalize for grouping: lowercase, collapse spaces, take first 80 chars."""
+# Common prompt boilerplate to exclude from "recurring topic" suggestions
+STOP_PHRASES = frozenset(
+    p.strip().lower()
+    for p in (
+        "how to", "how do i", "can you", "could you", "would you", "please",
+        "what is", "what are", "i want", "i need", "i would like", "add a", "add the",
+        "fix the", "update the", "change the", "make the", "help me", "show me",
+    )
+)
+
+
+def normalize_phrase(s: str) -> str:
+    """Lowercase, collapse whitespace, strip."""
     if not s:
         return ""
-    s = re.sub(r"\s+", " ", s.strip().lower())
-    return s[:80]
+    return re.sub(r"\s+", " ", s.strip().lower())
 
 
-def extract_key_phrases(prompt: str, max_words: int = 4) -> list[str]:
-    """Very simple phrase extraction: consecutive word runs that look like topics."""
-    words = re.findall(r"\b[a-zA-Z][a-zA-Z0-9]{1,24}\b", prompt.lower())
-    phrases = []
-    for i in range(len(words) - max_words + 1):
-        phrase = " ".join(words[i : i + max_words])
-        if len(phrase) > 10 and not phrase.startswith(("how to", "what is", "can you")):
-            phrases.append(phrase)
-    return phrases
+def extract_phrases_from_prompt(prompt: str, min_words: int = 2, max_words: int = 5) -> list[str]:
+    """Extract word n-grams from full prompt text; skip leading boilerplate."""
+    if not prompt:
+        return []
+    words = re.findall(r"\b[a-zA-Z][a-zA-Z0-9]{1,30}\b", prompt.lower())
+    seen: set[str] = set()
+    out: list[str] = []
+    for n in range(max_words, min_words - 1, -1):
+        for i in range(len(words) - n + 1):
+            phrase = " ".join(words[i : i + n])
+            if phrase in seen:
+                continue
+            if len(phrase) < 8:
+                continue
+            if any(phrase.startswith(prefix) for prefix in STOP_PHRASES):
+                continue
+            if any(phrase == p or phrase.startswith(p + " ") for p in STOP_PHRASES):
+                continue
+            seen.add(phrase)
+            out.append(phrase)
+    return out
 
 
 def main() -> None:
@@ -67,11 +89,13 @@ def main() -> None:
             print("No prompts logged yet. Send some messages in Cursor (with beforeSubmitPrompt hook enabled).", file=sys.stderr)
         return
 
-    # Patterns: first-line frequency (what you keep asking)
-    first_lines = [normalize_first_line(e.get("first_line", "")) for e in entries if e.get("first_line")]
-    first_line_counts = Counter(first_lines)
+    # Phrase counts from full prompt text (recurring topics across all prompts)
+    phrase_counts: Counter[str] = Counter()
+    for e in entries:
+        prompt = e.get("prompt") or ""
+        for phrase in extract_phrases_from_prompt(prompt):
+            phrase_counts[phrase] += 1
 
-    # Full prompt length and attachment stats
     lengths = [e.get("prompt_length", 0) for e in entries]
     with_attachments = sum(1 for e in entries if (e.get("attachment_count") or 0) > 0)
 
@@ -81,34 +105,33 @@ def main() -> None:
         print(f"  With attachments: {with_attachments}")
         print(f"  Avg prompt length: {sum(lengths) / len(lengths):.0f} chars")
         print()
-        print("## Most frequent first lines (recurring intents)")
-        for line, count in first_line_counts.most_common(15):
-            if not line or count < 2:
-                continue
-            print(f"  [{count}x] {line[:70]}{'…' if len(line) > 70 else ''}")
+        print("## Most frequent phrases (recurring topics across full prompts)")
+        for phrase, count in phrase_counts.most_common(20):
+            if count < 2:
+                break
+            print(f"  [{count}x] {phrase[:70]}{'…' if len(phrase) > 70 else ''}")
         print()
 
-    # Suggest CLAUDE.md sections from repeated first lines
-    repeated = [(line, c) for line, c in first_line_counts.items() if c >= 2 and line]
+    # Suggest CLAUDE.md sections from repeated phrases (from full-prompt analysis)
+    repeated = [(phrase, c) for phrase, c in phrase_counts.items() if c >= 2 and len(phrase) >= 8]
     if not repeated:
         if not args.suggest_only:
-            print("No repeated first-line patterns yet. Keep using Cursor; re-run after more prompts.")
+            print("No repeated phrase patterns yet. Keep using Cursor; re-run after more prompts.")
         return
 
     print("## Suggested additions for CLAUDE.md (or .cursor/rules)")
     print()
     print("Add context so the AI already knows these; then you can stop re-asking.")
     print()
-    for line, count in sorted(repeated, key=lambda x: -x[1])[:12]:
-        # Turn a repeated prompt start into a doc heading + placeholder
-        heading = line[:50].strip()
+    for phrase, count in sorted(repeated, key=lambda x: -x[1])[:12]:
+        heading = phrase[:60].strip()
         if not heading.endswith("?"):
             heading = heading.rstrip(".")
         print(f"### {heading}")
         print("<!-- Add 1–2 sentences: stack, convention, or decision -->")
         print()
     print("---")
-    print("(Generated from prompt log. Edit CLAUDE.md or .cursor/rules and add the missing context.)")
+    print("(Generated from full-prompt phrase analysis. Edit CLAUDE.md or .cursor/rules and add the missing context.)")
 
 
 if __name__ == "__main__":
